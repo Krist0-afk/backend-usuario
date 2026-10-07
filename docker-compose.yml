@@ -1,0 +1,139 @@
+version: '3.8'
+
+services:
+  # 1. Base de Datos Central
+  postgres:
+    image: postgres:15-alpine
+    container_name: postgres_db
+    restart: always
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: password123
+      POSTGRES_DB: pedidos360_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # 2. Broker de Mensajería (RabbitMQ)
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq_broker
+    restart: always
+    ports:
+      - "5672:5672"   # Puerto de comunicación interna
+      - "15672:15672" # Panel de administración web
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+
+  # 3. Microservicio: Auth
+  auth:
+    build: ./Backend-cloud-auth
+    container_name: auth_app
+    restart: always
+    ports:
+      - "8080:8080"
+
+  # 4. Microservicio: Catálogo
+  catalogo:
+    build: ./backend-cloud-catalogo
+    container_name: catalogo_app
+    restart: always
+    ports:
+      - "8081:8081"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: pedidos360_db
+      DB_USER: admin
+      DB_PASS: password123
+    depends_on:
+      - postgres
+
+  # 5. Microservicio: Compras
+  compras:
+    build: ./backend-cloud-compras
+    container_name: compras_app
+    restart: always
+    ports:
+      - "8082:8082"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: pedidos360_db
+      DB_USER: admin
+      DB_PASS: password123
+    depends_on:
+      - postgres
+
+  # 6. Microservicio: Usuarios (Produce a RabbitMQ)
+  usuarios:
+    build: ./backend-usuario
+    container_name: usuarios_app
+    restart: always
+    ports:
+      - "8084:8084"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: pedidos360_db
+      DB_USER: admin
+      DB_PASS: password123
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: guest
+      RABBITMQ_PASS: guest
+    depends_on:
+      - postgres
+      - rabbitmq
+
+  # 7. Microservicio: Notificaciones (Consume de RabbitMQ)
+  notificaciones:
+    build: ./bakcend-notificaciones
+    container_name: notificaciones_app
+    restart: always
+    ports:
+      - "8085:8085"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: pedidos360_db
+      DB_USER: admin
+      DB_PASS: password123
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: guest
+      RABBITMQ_PASS: guest
+    depends_on:
+      - postgres
+      - rabbitmq
+
+  # 8. Microservicio: Órdenes (Orquestador Rest + RabbitMQ)
+  ordenes:
+    build: ./Backend-cloud-ordenes
+    container_name: ordenes_app
+    restart: always
+    ports:
+      - "8086:8086"
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: pedidos360_db
+      DB_USER: admin
+      DB_PASS: password123
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: guest
+      RABBITMQ_PASS: guest
+      # Comunicación interna entre contenedores usando los nombres de los servicios
+      COMPRAS_URL: http://compras:8082/api/v1/compras
+      CATALOGO_URL: http://catalogo:8081/api/v1/catalogo
+    depends_on:
+      - postgres
+      - rabbitmq
+      - compras
+      - catalogo
+
+volumes:
+  postgres_data:
